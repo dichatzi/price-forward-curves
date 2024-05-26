@@ -1,26 +1,26 @@
 import pandas as pd
 from pyomo.environ import *
-
+from DataLoader import *
 
 
 # Load data
-prices_data = pd.read_csv("./historical_prices.csv")
-print(prices_data)
+# prices_data = pd.read_csv("./historical_prices.csv")
+# print(prices_data)
 
 # Define model parameters
-BestBid = 53.71
-BestAsk = 53.71
-BestBid_Peak = 57.36
-BestAsk_Peak = 57.36
+BestBid = 152.2
+BestAsk = 152.2
+BestBid_Peak = 165.62
+BestAsk_Peak = 165.62
 
-lambda_h = 0
+lambda_h = 1
 lambda_d = 1
 MinPerc = 1 
 MaxPerc = 1
 
 
 # Get dates
-days = prices_data["DAY"].drop_duplicates()
+# days = prices_data["DAY"].drop_duplicates()
 
 
 # Define set related parameters
@@ -33,24 +33,24 @@ WeekDayNames = ["Monday", "Tuseday", "Wednesday", "Thursday", "Friday", "Saturda
 PARAMETERS ====================================================================
 """
 # Define prices
-Price = dict()
-for r in range(prices_data.shape[0]):
-	hour = prices_data["ID"].iloc[r]
-	price = prices_data["INPUT"].iloc[r]
+# Price = dict()
+# for r in range(prices_data.shape[0]):
+# 	hour = prices_data["ID"].iloc[r]
+# 	price = prices_data["INPUT"].iloc[r]
 
-	Price[hour] = price
+# 	Price[hour] = price
 
 # Define trading hour per time unit
-Periods = dict()
-hour_counter = 0
-for r in range(prices_data.shape[0]):
-	hour_counter = hour_counter + 1
-	hour = prices_data["ID"].iloc[r]
+# Periods = dict()
+# hour_counter = 0
+# for r in range(prices_data.shape[0]):
+# 	hour_counter = hour_counter + 1
+# 	hour = prices_data["ID"].iloc[r]
 
-	Periods[hour] = hour_counter
+# 	Periods[hour] = hour_counter
 
-	if hour_counter == 24:
-		hour_counter = 0
+# 	if hour_counter == 24:
+# 		hour_counter = 0
 
 
 
@@ -65,23 +65,31 @@ m = ConcreteModel(name="PriceForwardCurves")
 m.dual = Suffix(direction=Suffix.IMPORT)
 
 # Define Sets
-m.T = Set(initialize=[t for t in range(1,25)])
-m.H = Set(initialize=[h for h in range(1,745)])
-m.HP = Set(initialize=[h for h in range(7,745) if Periods[h] > 8 and Periods[h] < 21])
-m.D = Set(initialize=WeekDayNames)
-m.TD = Set(initialize=days)
+hids = [h for h in range(1,max_hours+1)]
+hour_ids_yp = [h for h in hour_ids if Periods[h] > 8 and Periods[h] < 21]
+
+# m.T = Set(initialize=hours)
+
+m.H = Set(initialize=hour_ids)					# Set of trading hours (1 to 8784)
+m.HYP = Set(initialize=hour_ids_yp)				# Set of trading hours belonging to yearly peak
+
+# m.HP = Set(initialize=hids_yp)
+# m.D = Set(initialize=WeekDayNames)
+m.TD = Set(initialize=day_ids)				# Set of trading days (1 to 365)
+# m.Y = Set(initialize=years)
+# m.M = Set(initialize=months)
 
 
 """
 PARAMETERS
 """
 # Define time unit to trading unit incidence matrix
-Ih2d = {(h,d): 0 for h in m.H for d in m.TD}
-for r in range(prices_data.shape[0]):
-	hour = prices_data["ID"].iloc[r]
-	trading_day = prices_data["DAY"].iloc[r]
+# Ih2d = {(h,d): 0 for h in m.H for d in m.TD}
+# for r in range(prices_data.shape[0]):
+# 	hour = prices_data["ID"].iloc[r]
+# 	trading_day = prices_data["DAY"].iloc[r]
 
-	Ih2d[(hour,trading_day)] = 1
+# 	Ih2d[(hour,trading_day)] = 1
 
 
 """
@@ -123,12 +131,12 @@ m.ask_limit = Constraint(rule=ask_limit)
 
 
 def bid_limit_peak(m):
-	return BestBid_Peak <= sum(m.f[h] for h in m.HP) / len(m.HP)
+	return BestBid_Peak <= sum(m.f[h] for h in m.HYP) / len(m.HYP)
 m.bid_limit_peak = Constraint(rule=bid_limit_peak)
 
 
 def ask_limit_peak(m):
-	return sum(m.f[h] for h in m.HP) / len(m.HP) <= BestAsk_Peak
+	return sum(m.f[h] for h in m.HYP) / len(m.HYP) <= BestAsk_Peak
 m.ask_limit_peak = Constraint(rule=ask_limit_peak)
 
 
@@ -139,7 +147,7 @@ m.daily_forward_price = Constraint(m.TD, rule=daily_forward_price)
 
 
 # Set solver
-ipopt_path = "C://IPOPT//bin//ipopt.exe"
+ipopt_path = "/opt/homebrew/bin/ipopt"
 solver = SolverFactory("ipopt", executable=ipopt_path)
 
 
@@ -162,3 +170,18 @@ for h in m.H:
 average_price = round(sum_of_prices / len(m.H), 2)
 
 print(f"Average price: {average_price}")
+
+print("====================================================================")
+# for h in m.HP:
+# 	print(h)
+# print(hours)
+# print(hids)
+
+# print(hour_ids_yp)
+
+
+with open('./price_forward_curve.csv', 'w') as file:
+	file.write("hour,original_price,new_price\n")
+	for h in m.H:
+		new_price = round(value(m.f[h]), 3)
+		file.write(f"{h},{Price[h]},{new_price}\n")
